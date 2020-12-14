@@ -12,7 +12,7 @@ global.c = console;
  */
 var server = restify.createServer();
 
-server.name = 'JST Server';
+server.name = 'JST Server for Admin';
 
 /**
  * handle cors middleware 
