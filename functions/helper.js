@@ -29,10 +29,11 @@ exports.sendErrorResponse = (req, res, err) => {
     if (typeof err.code !== 'undefined') {
 
         console.log('Code:', err.code);
-
+        console.log('Key:', err.key);
         switch (err.code) {
             case 'ER_DUP_ENTRY':
-                message = 'Username is already taken, Please choose another and try again.';
+                // message = 'Username is already taken, Please choose another and try again.';
+                message = err.sqlMessage;
                 break;
             default:
                 message = err.message;
@@ -100,3 +101,10 @@ exports.generateToken = (text) => {
 exports.getFormatedDate = (date, format = "YYYY-MM-DD HH:mm:ss") => {
     return moment(date).format(format);
 }
+
+exports.getStatus = (curretStatus) => {
+    let all = ['In-active', 'Active'];
+
+    return all[curretStatus];
+}
+

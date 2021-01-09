@@ -4,14 +4,14 @@ exports.login = function (req, res, next) {
     try {
         var params = req.body;
 
-        let query = `SELECT * FROM users WHERE email='${params.email}' AND deleted_at IS NULL`;
+        let query = `SELECT * FROM users WHERE email='${params.username}' AND deleted_at IS NULL`;
         c.log('query:', query)
         req.connection.query(query, function (err, results) {
             if (err) {
                 helper.sendErrorResponse(req, res, err);
             }
             else if (!results.length) {
-                helper.sendErrorResponse(req, res, 'Invalid email.');
+                helper.sendErrorResponse(req, res, 'Invalid username/email.');
             }
             else if (!results[0].status) {
                 helper.sendErrorResponse(req, res, 'Your account in-active, please contact to administrator.');
@@ -127,72 +127,38 @@ exports.create_account = async function (req, res, next) {
     try {
         let params = req.body;
 
-        let isSetMargin = false;
-        if (typeof params.margin_per !== 'undefined' || typeof params.margin_fix !== 'undefined') {
-            isSetMargin = true;
-        }
+        let data = {
+            role: 'User',
+            name: params.name,
+            email: params.email,
+            mobile: params.mobile,
+            dob: params.dob,
+            gender: params.gender,
+            status: params.status,
+        };
+        req.connection.query(`INSERT INTO users SET ? , created_at=NOW(), updated_at=NOW()`, data, function(err, results){
 
-        let isCredit = false;
-        if (typeof params.credit !== 'undefined' && params.credit > 0 && params.role !== 'Sub-Admin') {
-            isCredit = true;
-        }
 
-        helper.generatePassword(params.password, (err, hashPassword) => {
             if (err) {
                 helper.sendErrorResponse(req, res, err);
             } else {
 
-                if (isSetMargin && params.margin_per > 0 && params.margin_fix > 0) {
-                    helper.sendErrorResponse(req, res, 'You can not set both type margin at same time.');
-                }
-                else if (isSetMargin && params.margin_per > 100) {
-                    helper.sendErrorResponse(req, res, 'You can not set margin more then 100%');
-                }
-                else {
+                let insertId = results.insertId;
 
-                    let query = `INSERT INTO users SET role='${params.role}', name='${params.name}', email='${params.email}', password='${hashPassword}', `;
-                    if (isSetMargin) {
-                        if (params.margin_per != '' && params.margin_per > 0) {
-                            query += `margin_per='${params.margin_per}', margin_fix=0, `;
-                        }
-                        else if (params.margin_fix != '' && params.margin_fix > 0) {
-                            query += `margin_per=0, margin_fix='${params.margin_fix}', `;
-                        }
+                // add user account settings 
+                let query = `INSERT INTO user_settings SET user_id='${insertId}', created_at=NOW(), updated_at=NOW()`;
+                req.connection.query(query, function (err, results) {
+
+                    if (err) {
+                        console.log('Account created, but error in account settings creation for the user-id:', insertId);
                     }
-                    if (isCredit) {
-                        query += `credit=${params.credit}, `;
-                    }
-                    query += `email='${params.email}', mobile='${params.mobile}', address='${params.address}', is_betting_locked=${params.is_betting_locked}, status=${params.status}, created_at=NOW(), updated_at=NOW()`;
+                });
 
-                    req.connection.query(query, function (err, results) {
-
-                        let insertId = results.insertId;
-
-                        if (err) {
-                            helper.sendErrorResponse(req, res, err);
-                        } else {
-
-                            // add credit into account 
-                            if (isCredit) {
-                                let query = `INSERT INTO user_credits SET user_id='${insertId}', action_user_id='${params.parent_id}', credit='${params.credit}', remark='Credit added at account registration time.', created_at=NOW(), updated_at=NOW()`;
-                                req.connection.query(query, function (err, results) {
-
-                                    if (err) {
-                                        console.log('Account created, but error in create transaction for credit.');
-                                    } else {
-                                        console.log('Account created and Credit added into account.');
-                                    }
-                                });
-                            }
-
-                            let result = {
-                                status: true,
-                                message: 'Account created successfully.',
-                            }
-                            helper.sendResponse(req, res, result);
-                        }
-                    });
+                let result = {
+                    status: true,
+                    message: 'Account created successfully.',
                 }
+                helper.sendResponse(req, res, result);
             }
         });
     }
@@ -206,7 +172,8 @@ exports.list_users = function (req, res, next) {
     try {
         let params = req.params;
 
-        req.connection.query(`SELECT * FROM users WHERE role='${params.type}' AND parent_id=${currentUser.id} AND deleted_at IS NULL`, function (err, results, fields) {
+        let query = `SELECT * FROM users WHERE role='User' AND deleted_at IS NULL`;
+        req.connection.query(query, function (err, results, fields) {
 
             if (err) {
                 helper.sendErrorResponse(req, res, err);
@@ -220,6 +187,8 @@ exports.list_users = function (req, res, next) {
                         name: rowInfo.name,
                         email: rowInfo.email,
                         mobile: rowInfo.mobile,
+                        gender: rowInfo.gender,
+                        dob: helper.getFormatedDate(rowInfo.dob, 'YYYY-MM-DD'),
                         status: rowInfo.status,
                     });
                 });
@@ -263,7 +232,10 @@ exports.detail_account = function (req, res, next) {
                     name: rowInfo.name,
                     email: rowInfo.email,
                     mobile: rowInfo.mobile,
+                    gender: rowInfo.gender,
+                    dob: helper.getFormatedDate(rowInfo.dob, 'YYYY-MM-DD'),
                     status: rowInfo.status,
+                    status_for_display: helper.getStatus(rowInfo.status),
                     created_at: helper.getFormatedDate(rowInfo.created_at),
                     updated_at: helper.getFormatedDate(rowInfo.updated_at),
                 }
@@ -289,48 +261,37 @@ exports.update_account = function (req, res, next) {
         let user_id = (currentUser.id == params.user_id) ? currentUser.id : params.user_id;
         let isSelf = (currentUser.id == params.user_id) ? true : false;
 
-        let isSetMargin = false;
-        if (typeof params.margin_per !== 'undefined' || typeof params.margin_fix !== 'undefined') {
-            isSetMargin = true;
+        let data = {};
+        if (!isSelf) {
+            data = {
+                name: params.name,
+                email: params.email,
+                mobile: params.mobile,
+                dob: params.dob,
+                gender: params.gender,
+                status: params.status,
+            };
+        } else {
+            data = {
+                name: params.name,
+                email: params.email,
+                mobile: params.mobile,
+            };
         }
+        req.connection.query(`UPDATE users SET ? , updated_at=NOW() WHERE id=${user_id}`, data, function(err, results){
 
-        if (!isSelf && isSetMargin && params.margin_per > 0 && params.margin_fix > 0) {
-            helper.sendErrorResponse(req, res, 'You can not set both type margin at same time.');
-        }
-        else if (!isSelf && isSetMargin && params.margin_per > 100) {
-            helper.sendErrorResponse(req, res, 'You can not set margin more then 100%');
-        }
-        else {
+            if (err) {
+                helper.sendErrorResponse(req, res, err);
+            } else {
 
-            let query = `UPDATE users SET name='${params.name}', `;
-            if (!isSelf && isSetMargin) {
-                if (params.margin_per != '' && params.margin_per > 0) {
-                    query += `margin_per='${params.margin_per}', margin_fix=0, `;
+                let result = {
+                    status: true,
+                    message: 'Account updated successfully.',
                 }
-                else if (params.margin_fix != '' && params.margin_fix > 0) {
-                    query += `margin_per=0, margin_fix='${params.margin_fix}', `;
-                }
+                helper.sendResponse(req, res, result);
             }
-            query += `email='${params.email}', mobile='${params.mobile}', address='${params.address}', `;
-            if (!isSelf) {
-                query += `is_betting_locked=${params.is_betting_locked}, status=${params.status}, `;
-            }
-            query += `updated_at=NOW() WHERE id=${user_id}`;
+        });
 
-            req.connection.query(query, function (err, results) {
-
-                if (err) {
-                    helper.sendErrorResponse(req, res, err);
-                } else {
-
-                    let result = {
-                        status: true,
-                        message: 'Account updated successfully.',
-                    }
-                    helper.sendResponse(req, res, result);
-                }
-            });
-        }
     }
     catch (err) {
         helper.sendErrorResponse(req, res, err);
@@ -514,6 +475,85 @@ exports.delete_account = function (req, res, next) {
                         let result = {
                             status: true,
                             message: 'Account deleted successfully.',
+                        }
+                        helper.sendResponse(req, res, result);
+                    }
+                });
+            }
+        });
+    }
+    catch (err) {
+        helper.sendErrorResponse(req, res, err);
+    }
+}
+
+exports.archive_users = function (req, res, next) {
+
+    try {
+        let params = req.params;
+
+        let query = `SELECT * FROM users WHERE role='User' AND deleted_at IS NOT NULL`;
+        req.connection.query(query, function (err, results, fields) {
+
+            if (err) {
+                helper.sendErrorResponse(req, res, err);
+            } else {
+
+                let rows = [];
+                async.forEach(results, (rowInfo) => {
+                    rows.push({
+                        id: rowInfo.id,
+                        role: rowInfo.role,
+                        name: rowInfo.name,
+                        email: rowInfo.email,
+                        mobile: rowInfo.mobile,
+                        gender: rowInfo.gender,
+                        deleted_at: helper.getFormatedDate(rowInfo.deleted_at),
+                        status: rowInfo.status,
+                    });
+                });
+
+                let result = {
+                    status: true,
+                    message: 'List accounts.',
+                    data: rows
+                }
+                helper.sendResponse(req, res, result);
+            }
+        });
+    }
+    catch (err) {
+        helper.sendErrorResponse(req, res, err);
+    }
+}
+
+exports.restore_account = function (req, res, next) {
+
+    try {
+        let params = req.params;
+        let user_id = params.user_id;
+
+        let query = `SELECT * FROM users WHERE id = ${user_id} AND deleted_at IS NOT NULL`;
+        req.connection.query(query, function (err, results, fields) {
+
+            if (err) {
+                helper.sendErrorResponse(req, res, err);
+            }
+            else if (!results.length) {
+                helper.sendErrorResponse(req, res, 'Account is not found, may be already restored.');
+            }
+            else {
+
+                let query = `UPDATE users SET deleted_at=NULL, updated_at=NOW() WHERE id=${user_id}`;
+                req.connection.query(query, function (err, results) {
+
+                    if (err) {
+                        helper.sendErrorResponse(req, res, err);
+                    } else {
+
+                        let result = {
+                            status: true,
+                            message: 'Account restored successfully.',
                         }
                         helper.sendResponse(req, res, result);
                     }

@@ -2,8 +2,8 @@
 const connectionConfig = {
     host: 'localhost',
     user: 'root',
-    password: '',
-    database: 'jst'
+    password: 'Apnanews@123developer',
+    database: 'emergency_service'
 };
 
 exports.createDatabaseConnection = (req, res, next) => {
